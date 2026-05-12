@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SQL Dashboard</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>SQL Dashboard</h1>
+        <p>Connect to and manage SQL servers from one interface.</p>
+      </div>
+
+      <div class="server-actions">
+        <select id="serverType">
+          <option value="mysql">MySQL / MariaDB</option>
+          <option value="postgres">PostgreSQL</option>
+          <option value="sqlite">SQLite</option>
+        </select>
+        <input id="serverName" type="text" placeholder="Connection name" />
+        <input id="serverHost" type="text" placeholder="Host (e.g. 127.0.0.1)" />
+        <input id="serverPort" type="text" placeholder="Port (default)" />
+        <input id="serverUser" type="text" placeholder="User" />
+        <input id="serverPassword" type="password" placeholder="Password" />
+        <input id="serverDatabase" type="text" placeholder="Database (optional)" />
+        <input id="serverFilePath" type="text" placeholder="SQLite file path" style="display:none;" />
+        <button id="createServer">Add connection</button>
+      </div>
+
+      <div id="serverList" class="server-list"></div>
+    </aside>
+
+    <main class="main-panel">
+      <div class="main-header">
+        <div>
+          <h2 id="serverTitle">No server selected</h2>
+          <p id="serverMeta">Create a connection to begin.</p>
+        </div>
+        <button id="deleteServer" class="danger" disabled>Delete</button>
+      </div>
+
+      <section class="status-card">
+        <h3>Server status</h3>
+        <div id="serverStatus">Select a server and refresh status.</div>
+        <button id="refreshStatus" disabled>Refresh status</button>
+      </section>
+
+      <section class="query-card">
+        <label for="sqlQuery">SQL / Command</label>
+        <textarea id="sqlQuery" placeholder="SELECT * FROM my_table;"></textarea>
+        <div class="query-actions">
+          <button id="runQuery" disabled>Run command</button>
+          <button id="loadTables" disabled>Refresh tables</button>
+        </div>
+      </section>
+
+      <section class="tables-card">
+        <h3>Tables</h3>
+        <div id="tableList" class="table-list">No server selected.</div>
+      </section>
+
+      <section class="results-card">
+        <h3>Results</h3>
+        <div id="queryResult" class="query-result">Run a command to see the result here.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
