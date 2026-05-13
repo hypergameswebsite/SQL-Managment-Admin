@@ -22,6 +22,8 @@ const serverStatus = document.getElementById('serverStatus');
 let servers = [];
 let activeServer = null;
 
+const STORAGE_KEY = 'sql_servers';
+
 function updateFormFields() {
   const type = serverTypeInput.value;
   const isSqlite = type === 'sqlite';
@@ -33,10 +35,21 @@ function updateFormFields() {
   serverFilePathInput.style.display = isSqlite ? 'block' : 'none';
 }
 
-async function fetchServers() {
-  const response = await fetch('/api/servers');
-  const json = await response.json();
-  servers = json.servers;
+function loadServersFromStorage() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveServersToStorage(serversList) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(serversList));
+}
+
+function fetchServers() {
+  servers = loadServersFromStorage();
   renderServerList();
 }
 
@@ -97,6 +110,25 @@ async function selectServer(server) {
   loadStatus();
 }
 
+async function testConnection(server) {
+  try {
+    const response = await fetch('/api/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(server),
+    });
+
+    if (!response.ok) {
+      const json = await response.json();
+      return { success: false, error: json.error || 'Connection failed.' };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: `Network error: ${err.message}` };
+  }
+}
+
 async function createServer() {
   const type = serverTypeInput.value;
   const name = serverNameInput.value.trim();
@@ -108,26 +140,29 @@ async function createServer() {
   const filePath = serverFilePathInput.value.trim();
 
   if (!name) {
-    alert('Enter a connection name.');
+    renderStatus('Error: Enter a connection name.', true);
     return;
   }
 
   if (type !== 'sqlite' && (!host || !user)) {
-    alert('Host and user are required for MySQL/PostgreSQL.');
+    renderStatus('Error: Host and user are required for MySQL/PostgreSQL.', true);
     return;
   }
 
-  const response = await fetch('/api/servers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, name, host, port, user, password, database, filePath }),
-  });
+  renderStatus('Testing connection...');
+  const testServer = { type, name, host, port, user, password, database, filePath };
+  const result = await testConnection(testServer);
 
-  const json = await response.json();
-  if (!response.ok) {
-    alert(json.error || 'Unable to add connection.');
+  if (!result.success) {
+    renderStatus(`Error: ${result.error}`, true);
     return;
   }
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const server = { id, type, name, host, port, user, password, database, filePath, createdAt: new Date().toISOString() };
+
+  servers.push(server);
+  saveServersToStorage(servers);
 
   serverNameInput.value = '';
   serverHostInput.value = '';
@@ -137,24 +172,21 @@ async function createServer() {
   serverDatabaseInput.value = '';
   serverFilePathInput.value = '';
 
-  await fetchServers();
-  selectServer(json.server);
+  renderStatus(`Connection "${name}" created successfully!`);
+  fetchServers();
+  selectServer(server);
 }
 
-async function deleteServer() {
+function deleteServer() {
   if (!activeServer || !confirm(`Delete connection "${activeServer.name}"?`)) {
     return;
   }
 
-  const response = await fetch(`/api/servers/${activeServer.id}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const json = await response.json();
-    alert(json.error || 'Unable to delete connection.');
-    return;
-  }
+  servers = servers.filter((s) => s.id !== activeServer.id);
+  saveServersToStorage(servers);
 
   activeServer = null;
-  await fetchServers();
+  fetchServers();
 }
 
 async function loadStatus() {
@@ -163,14 +195,22 @@ async function loadStatus() {
   }
 
   renderStatus('Loading server status...');
-  const response = await fetch(`/api/servers/${activeServer.id}/status`);
-  const json = await response.json();
-  if (!response.ok) {
-    renderStatus(json.error || 'Unable to load server status.', true);
-    return;
-  }
+  try {
+    const response = await fetch(`/api/servers/${activeServer.id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: activeServer }),
+    });
+    const json = await response.json();
+    if (!response.ok) {
+      renderStatus(`Error: ${json.error || 'Unable to load server status.'}`, true);
+      return;
+    }
 
-  renderStatus(`Type: ${json.type.toUpperCase()}<br>Version: ${json.version || 'unknown'}<br>Host: ${json.host}<br>Database: ${json.database}`);
+    renderStatus(`Type: ${json.type.toUpperCase()}<br>Version: ${json.version || 'unknown'}<br>Host: ${json.host}<br>Database: ${json.database}`);
+  } catch (err) {
+    renderStatus(`Error: ${err.message}`, true);
+  }
 }
 
 async function loadTables() {
@@ -178,26 +218,34 @@ async function loadTables() {
     return;
   }
 
-  const response = await fetch(`/api/servers/${activeServer.id}/tables`);
-  if (!response.ok) {
+  try {
+    const response = await fetch(`/api/servers/${activeServer.id}/tables`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: activeServer }),
+    });
+    if (!response.ok) {
+      const json = await response.json();
+      renderStatus(`Error: ${json.error || 'Unable to load tables.'}`, true);
+      return;
+    }
+
     const json = await response.json();
-    renderStatus(json.error || 'Unable to load tables.', true);
-    return;
-  }
+    if (!json.tables.length) {
+      tableList.innerHTML = '<p class="empty-state">No tables found.</p>';
+      return;
+    }
 
-  const json = await response.json();
-  if (!json.tables.length) {
-    tableList.innerHTML = '<p class="empty-state">No tables found.</p>';
-    return;
+    tableList.innerHTML = '';
+    json.tables.forEach((table) => {
+      const item = document.createElement('div');
+      item.className = 'table-item';
+      item.innerHTML = `<strong>${table.name}</strong> <span>${table.type}</span>`;
+      tableList.appendChild(item);
+    });
+  } catch (err) {
+    tableList.innerHTML = `<p class="empty-state">Error: ${err.message}</p>`;
   }
-
-  tableList.innerHTML = '';
-  json.tables.forEach((table) => {
-    const item = document.createElement('div');
-    item.className = 'table-item';
-    item.innerHTML = `<strong>${table.name}</strong> <span>${table.type}</span>`;
-    tableList.appendChild(item);
-  });
 }
 
 async function runQuery() {
@@ -212,50 +260,54 @@ async function runQuery() {
   }
 
   queryResult.innerHTML = 'Running command...';
-  const response = await fetch(`/api/servers/${activeServer.id}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql }),
-  });
+  try {
+    const response = await fetch(`/api/servers/${activeServer.id}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server: activeServer, sql }),
+    });
 
-  const json = await response.json();
-  if (!response.ok) {
-    queryResult.innerHTML = `<div class="error-message">${json.error || 'Command failed.'}</div>`;
-    return;
-  }
-
-  if (json.rows) {
-    if (!json.rows.length) {
-      queryResult.innerHTML = '<div class="result-message">Command returned no rows.</div>';
+    const json = await response.json();
+    if (!response.ok) {
+      queryResult.innerHTML = `<div class="error-message">${json.error || 'Command failed.'}</div>`;
       return;
     }
 
-    const table = document.createElement('table');
-    table.className = 'result-table';
-    const header = document.createElement('tr');
+    if (json.rows) {
+      if (!json.rows.length) {
+        queryResult.innerHTML = '<div class="result-message">Command returned no rows.</div>';
+        return;
+      }
 
-    json.columns.forEach((column) => {
-      const th = document.createElement('th');
-      th.textContent = column;
-      header.appendChild(th);
-    });
-    table.appendChild(header);
+      const table = document.createElement('table');
+      table.className = 'result-table';
+      const header = document.createElement('tr');
 
-    json.rows.forEach((row) => {
-      const tr = document.createElement('tr');
       json.columns.forEach((column) => {
-        const td = document.createElement('td');
-        td.textContent = row[column] ?? '';
-        tr.appendChild(td);
+        const th = document.createElement('th');
+        th.textContent = column;
+        header.appendChild(th);
       });
-      table.appendChild(tr);
-    });
+      table.appendChild(header);
 
-    queryResult.innerHTML = '';
-    queryResult.appendChild(table);
-  } else {
-    queryResult.innerHTML = `<div class="result-message">Changes: ${json.changes ?? 0}${json.lastInsertRowid ? `, Insert ID: ${json.lastInsertRowid}` : ''}</div>`;
-    await loadTables();
+      json.rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        json.columns.forEach((column) => {
+          const td = document.createElement('td');
+          td.textContent = row[column] ?? '';
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+
+      queryResult.innerHTML = '';
+      queryResult.appendChild(table);
+    } else {
+      queryResult.innerHTML = `<div class="result-message">Changes: ${json.changes ?? 0}${json.lastInsertRowid ? `, Insert ID: ${json.lastInsertRowid}` : ''}</div>`;
+      await loadTables();
+    }
+  } catch (err) {
+    queryResult.innerHTML = `<div class="error-message">Error: ${err.message}</div>`;
   }
 }
 

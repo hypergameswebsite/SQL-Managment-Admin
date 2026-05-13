@@ -108,11 +108,6 @@ function rowsToPlain(rows) {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/api/servers', (req, res) => {
-  const servers = loadServers();
-  res.json({ servers });
-});
-
 app.post('/api/servers', async (req, res) => {
   const type = String(req.body.type || 'mysql').trim();
   const name = String(req.body.name || `New ${type} server`).trim();
@@ -135,12 +130,10 @@ app.post('/api/servers', async (req, res) => {
     return res.status(400).json({ error: 'Host and user are required for MySQL/PostgreSQL.' });
   }
 
-  const servers = loadServers();
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const server = { id, type, name, host, port, user, password, database, filePath, createdAt: new Date().toISOString() };
+  const testServer = { id: 'test', type, name, host, port, user, password, database, filePath };
 
   try {
-    const connection = await createConnection(server);
+    const connection = await createConnection(testServer);
 
     if (type === 'sqlite') {
       connection.close();
@@ -151,33 +144,16 @@ app.post('/api/servers', async (req, res) => {
       await connection.end();
     }
   } catch (error) {
-    return res.status(400).json({ error: `Unable to connect: ${error.message}` });
+    return res.status(400).json({ error: `Connection failed: ${error.message}` });
   }
 
-  servers.push(server);
-  saveServers(servers);
-
-  res.status(201).json({ server });
+  res.status(200).json({ success: true, message: 'Connection test successful!' });
 });
 
-app.delete('/api/servers/:id', (req, res) => {
-  const id = req.params.id;
-  const servers = loadServers();
-  const index = servers.findIndex((server) => server.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Server not found.' });
-  }
-
-  servers.splice(index, 1);
-  saveServers(servers);
-
-  res.json({ success: true });
-});
-
-app.get('/api/servers/:id/status', async (req, res) => {
-  const server = findServer(req.params.id);
+app.post('/api/servers/:id/status', async (req, res) => {
+  const server = req.body.server;
   if (!server) {
-    return res.status(404).json({ error: 'Server not found.' });
+    return res.status(400).json({ error: 'Server configuration required.' });
   }
 
   try {
@@ -203,14 +179,14 @@ app.get('/api/servers/:id/status', async (req, res) => {
 
     return res.json({ type: server.type, version, host: server.host, database: server.database || 'default' });
   } catch (error) {
-    return res.status(400).json({ error: `Unable to query server status: ${error.message}` });
+    return res.status(400).json({ error: `Connection error: ${error.message}` });
   }
 });
 
-app.get('/api/servers/:id/tables', async (req, res) => {
-  const server = findServer(req.params.id);
+app.post('/api/servers/:id/tables', async (req, res) => {
+  const server = req.body.server;
   if (!server) {
-    return res.status(404).json({ error: 'Server not found.' });
+    return res.status(400).json({ error: 'Server configuration required.' });
   }
 
   try {
@@ -246,9 +222,9 @@ app.get('/api/servers/:id/tables', async (req, res) => {
 });
 
 app.post('/api/servers/:id/query', async (req, res) => {
-  const server = findServer(req.params.id);
+  const server = req.body.server;
   if (!server) {
-    return res.status(404).json({ error: 'Server not found.' });
+    return res.status(400).json({ error: 'Server configuration required.' });
   }
 
   const sql = String(req.body.sql || '').trim();
